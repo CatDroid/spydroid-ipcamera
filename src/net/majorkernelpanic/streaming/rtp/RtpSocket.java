@@ -69,18 +69,27 @@ public class RtpSocket implements Runnable {
 	 */
 	public RtpSocket() {
 		
+		//	组播地址的范围在224.0.0.0--- 239.255.255.255之间（都为D类地址 1110开头）
+		//
 		mCacheSize = 00;
 		mBufferCount = 300; // TODO: reajust that when the FIFO is full 
 		mBuffers = new byte[mBufferCount][];
-		mPackets = new DatagramPacket[mBufferCount];
-		mReport = new SenderReport();
+		mPackets = new DatagramPacket[mBufferCount]; // package是用来 MulticastSocket::send的
+		// rtcp 
+		mReport = new SenderReport();	// 服务端rtcp的socket 也是一个MulticastSocket
 		mAverageBitrate = new AverageBitrate();
 		
-		resetFifo();
+		resetFifo(); 
+		// 把两个信号量初始化为
+		// mBufferRequested = mBufferCount , mBufferCommitted = 0
 
 		for (int i=0; i<mBufferCount; i++) {
-
-			mBuffers[i] = new byte[MTU];
+			
+			//  组播和普通UDP socket之间的区别在于必须考虑TTL值 
+			//	这时IP首部中取值 0- 255的一个字节。 它的含义为包被丢弃前通过的路由数目
+			//	每通过一个路由器，其TTL减少1，有些路由器减少2或更多。当TTL值为0时包就被丢弃
+			// 
+			mBuffers[i] = new byte[MTU]; // 300个buffer x 每个buffer1300  个字节
 			mPackets[i] = new DatagramPacket(mBuffers[i], 1);
 
 			/*							     Version(2)  Padding(0)					 					*/
@@ -93,22 +102,31 @@ public class RtpSocket implements Runnable {
 			mBuffers[i][0] = (byte) Integer.parseInt("10000000",2);
 
 			/* Payload Type */
-			mBuffers[i][1] = (byte) 96;
+			mBuffers[i][1] = (byte) 96; // 每个buffer的开头两个字节 是  10000000 和 payload type=96
 
 			/* Byte 2,3        ->  Sequence Number                   */
 			/* Byte 4,5,6,7    ->  Timestamp                         */
 			/* Byte 8,9,10,11  ->  Sync Source Identifier            */
-
+			/* 上面就是固定的12个字节 rtp头部 */
 		}
 
 		try {
-		mSocket = new MulticastSocket();
+			mSocket = new MulticastSocket();
 		} catch (Exception e) {
 			throw new RuntimeException(e.getMessage());
 		}
 		
 	}
-
+	
+	/* 	把两个信号量初始化为 acquire -1 release =1 
+	 	mBufferRequested 初始计数 mBufferCount , mBufferCommitted 初始计数 0
+					 
+		mBufferRequested 空闲的buffer(requestBuffer)  
+		mBufferCommitted 代表有数据的buffer(commitBuffer),可用来Multisocket::send发送 
+		
+		mBufferOut	记录即将/当前往socket所送的rtp包buffer索引 run() 
+		mBufferIn	记录即将/当前处理的rtp包 buffer索引 commitBuffer() 
+		*/
 	private void resetFifo() {
 		mCount = 0;
 		mBufferIn = 0;
@@ -116,6 +134,9 @@ public class RtpSocket implements Runnable {
 		mTimestamps = new long[mBufferCount];
 		mBufferRequested = new Semaphore(mBufferCount);
 		mBufferCommitted = new Semaphore(0);
+		/*
+		 *  
+		 * */
 		mReport.reset();
 		mAverageBitrate.reset();
 	}
@@ -159,11 +180,19 @@ public class RtpSocket implements Runnable {
 		mPort = dport;
 		for (int i=0;i<mBufferCount;i++) {
 			mPackets[i].setPort(dport);
-			mPackets[i].setAddress(dest);
-		}
+			mPackets[i].setAddress(dest); // 设置每个包的目标地址 和 目标端口
+		}									// UDP每次发包都要带地址和端口
 		mReport.setDestination(dest, rtcpPort);
 	}
-
+	/*
+	 * setTimeToLive		设置socket的ttl
+	 * setDestination		设置每个数据报的目标地址和目标端口
+	 * 
+	 * getPort				客户端用于rtp的端口
+	 * getLocalPort			服务端用于rtp的端口(还会分视频和音频的 )
+	 * 
+	 * getRtcpSocket		获得RtpSocket实例对应的SenderReport实例(用于rtcp)
+	 * */
 	public int getPort() {
 		return mPort;
 	}
@@ -182,7 +211,7 @@ public class RtpSocket implements Runnable {
 	 * @throws InterruptedException 
 	 **/
 	public byte[] requestBuffer() throws InterruptedException {
-		mBufferRequested.acquire();
+		mBufferRequested.acquire(); // -1 
 		mBuffers[mBufferIn][1] &= 0x7F;
 		return mBuffers[mBufferIn];
 	}
@@ -191,20 +220,20 @@ public class RtpSocket implements Runnable {
 	public void commitBuffer() throws IOException {
 
 		if (mThread == null) {
-			mThread = new Thread(this);
+			mThread = new Thread(this);// 启动线程发送
 			mThread.start();
 		}
 		
-		if (++mBufferIn>=mBufferCount) mBufferIn = 0;
-		mBufferCommitted.release();
+		if (++mBufferIn>=mBufferCount) mBufferIn = 0; 
+		mBufferCommitted.release();// +1 
 
 	}	
 	
 	/** Sends the RTP packet over the network. */
 	public void commitBuffer(int length) throws IOException {
-		updateSequence();
-		mPackets[mBufferIn].setLength(length);
-
+		updateSequence(); // 序号加1
+		mPackets[mBufferIn].setLength(length); 	//	每个DatagramPacket的Buffer总长都是  new byte[MTU] MTU = 1300  个字节
+												//	这里设置DatagramPacket实际发送的长度
 		mAverageBitrate.push(length);
 
 		if (++mBufferIn>=mBufferCount) mBufferIn = 0;
@@ -214,7 +243,7 @@ public class RtpSocket implements Runnable {
 			mThread = new Thread(this);
 			mThread.start();
 		}		
-		
+	 
 	}
 
 	/** Returns an approximation of the bitrate of the RTP stream in bit per seconde. */
@@ -229,12 +258,32 @@ public class RtpSocket implements Runnable {
 
 	/** 
 	 * Overwrites the timestamp in the packet.
-	 * @param timestamp The new timestamp in ns.
+	 * @param timestamp The new timestamp in ns. 单位是ns 
+	 * 
+	 *        毫秒(ms)		微秒 (μs)		纳秒(ns)		皮秒(ps) 
+		1 s = 10^3ms  		10^6us      10^9 ns   	10^12 ps 
+
 	 **/
 	public void updateTimestamp(long timestamp) {
 		mTimestamps[mBufferIn] = timestamp;
 		setLong(mBuffers[mBufferIn], (timestamp/100L)*(mClock/1000L)/10000L, 4, 8);
 	}
+	
+	/* 方法					设置rtph
+	 * updateTimestamp		rtph[4~8) = timstamp 这个rtp包 打包的时间
+	 * markNextPacket		rtph[1] |= 0x80  如果当前 NALU为一个接入单元最后的那个NALU，那么将M位置 1;
+	 * 										 或者当前RTP 数据包为一个NALU 的最后的那个分片时 ，M位置 1;
+	 * 										 目前SpyAndroid实现 run()中 NALU分片时候 最后一个RTP数据包 M=1 中间的RTP包M=0
+	 * 											不分片的情况 每个RTP包 都 M = 1 
+	 * updateSequence		rtph[2~4) = ++mSeq   自增序号
+	 * setSSRC				rtph[8~12) = ssrc	 mSsrc	所有rtp包都一样( AbstractPacketizer()随机值 )
+	 * RtpSocket创建时候		rtph[0] 	10000000 所有rtp包都一样
+	 * RtpSocket			rtph[1]		96'D 60'H payload type 所有rtp包都一样
+	 * 
+	 * 
+	 * rtph[0] = 10 00 00 00 B  rtph[1] = 96  rtph[2~3] = 序号  rtph[4~7] = 时间戳
+	 * rtph[8~11] SSRC 同步 源 标识符
+	 * */
 
 	/** Sets the marker in the RTP packet. */
 	public void markNextPacket() {
@@ -243,36 +292,78 @@ public class RtpSocket implements Runnable {
 
 	/** The Thread sends the packets in the FIFO one by one at a constant rate. */
 	@Override
-	public void run() {
+	public void run() { // 来自 commitBuffer 
 		Statistics stats = new Statistics(50,3000);
 		try {
 			// Caches mCacheSize milliseconds of the stream in the FIFO.
 			Thread.sleep(mCacheSize);
 			long delta = 0;
+			// 等待 超时4s (long timeout, TimeUnit unit)
 			while (mBufferCommitted.tryAcquire(4,TimeUnit.SECONDS)) {
 				if (mOldTimestamp != 0) {
 					// We use our knowledge of the clock rate of the stream and the difference between two timestamps to
 					// compute the time lapse that the packet represents.
 					if ((mTimestamps[mBufferOut]-mOldTimestamp)>0) {
+						// 即将要发的rtp包 一定要比 上一个 要晚
+						
 						stats.push(mTimestamps[mBufferOut]-mOldTimestamp);
 						long d = stats.average()/1000000;
 						//Log.d(TAG,"delay: "+d+" d: "+(mTimestamps[mBufferOut]-mOldTimestamp)/1000000);
 						// We ensure that packets are sent at a constant and suitable rate no matter how the RtpSocket is used.
-						if (mCacheSize>0) Thread.sleep(d);
+						// 我们按照一个固定和稳定的速率发送 不管怎么使用rtpsocket
+						if (mCacheSize>0){ 
+							/// ???  实际没有看到 这个 ???
+							Log.d("LILI", " mCacheSize = " + mCacheSize + " sleep = " + d );
+							Thread.sleep(d);
+						}
 					} else if ((mTimestamps[mBufferOut]-mOldTimestamp)<0) {
+						
+						// 错误 即将要发的rtp包  要比 上一个 要早 ～～～
 						Log.e(TAG, "TS: "+mTimestamps[mBufferOut]+" OLD: "+mOldTimestamp);
 					}
 					delta += mTimestamps[mBufferOut]-mOldTimestamp;
-					if (delta>500000000 || delta<0) {
+					if (delta>500000000 || delta<0) { // delta  只是为了统计 无用
 						//Log.d(TAG,"permits: "+mBufferCommitted.availablePermits());
 						delta = 0;
 					}
 				}
-				mReport.update(mPackets[mBufferOut].getLength(), System.nanoTime(),(mTimestamps[mBufferOut]/100L)*(mClock/1000L)/10000L);
-				mOldTimestamp = mTimestamps[mBufferOut];
-				if (mCount++>30) mSocket.send(mPackets[mBufferOut]);
+				
+				
+				
+				/*
+				 	D/TOM     ( 4689): [9] In = 3161193910
+					D/TOM     ( 4689): [6] Out = 3161193910 now = 3161198130 diff = 4220 size = 542  <= 可以一个rtp包发送完  00 00 00 01 + NALU header(1 byte) + NALU body = 542 
+					D/TOM     ( 4689): now = 3161198539034 mTimestamps[mBufferOut] = 3161193910000iff = 4629034 Seq = 7e9
+	
+				   	D/TOM     ( 4689): [2] In = 3161360951
+					D/TOM     ( 4689): [3] Out = 3161360951 now = 3161365020 diff = 4069 size = 3068 <= 导致了DALU分片发送  用多个rtp包发送
+					D/TOM     ( 4689): now = 3161365279111 mTimestamps[mBufferOut] = 3161360951000 diff = 4328111 Seq = 7f2
+					D/TOM     ( 4689): now = 3161365841418 mTimestamps[mBufferOut] = 3161360951000 diff = 4890418 Seq = 7f3
+					D/TOM     ( 4689): now = 3161366063034 mTimestamps[mBufferOut] = 3161360951000 diff = 5112034 Seq = 7f4
+				 * 
+				 * */
+				
+				// rtcp socket 流控 1.包的大小 2.发送时候的时间戳  3.对应rtp包的时间戳 
+				long thisisnow = System.nanoTime() ;
+				byte[] test = mPackets[mBufferOut].getData();
+				Log.d("TOM", "now = " +   thisisnow   + " mTimestamps[mBufferOut] = " + mTimestamps[mBufferOut] 
+								+ " diff = " +  (  thisisnow   - mTimestamps[mBufferOut])  
+								+ " Seq = " + Integer.toHexString( 0xFF&test[2])  + Integer.toHexString( 0xFF&test[3])
+								
+								);
+				mReport.update(mPackets[mBufferOut].getLength(), thisisnow ,(mTimestamps[mBufferOut]/100L)*(mClock/1000L)/10000L);
+				
+				// 上一个rtp包的时间
+				// 类似MediaCodec::dequeueOutputBuffer编码后H264帧/NALU时间戳 
+				// 但如果NALU过大的话 那么就会分离 rtp包的时间戳就会一样(rtp包序号不一样) 
+				mOldTimestamp = mTimestamps[mBufferOut]; 
+	
+				// 发送rtp包 仍掉开头的30fp ??
+				// 如果mCount<30 也当成已经覆盖了 mBufferOut往前走
+				if (mCount++>30) mSocket.send(mPackets[mBufferOut]);  
+				
 				if (++mBufferOut>=mBufferCount) mBufferOut = 0;
-				mBufferRequested.release();
+				mBufferRequested.release(); // +1 这样 requestBuffer 就有buffer可用了
 			}
 		} catch (Exception e) {
 			e.printStackTrace();

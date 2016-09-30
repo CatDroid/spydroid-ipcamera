@@ -333,7 +333,7 @@ public abstract class VideoStream extends MediaStream {
 		createCamera();
 
 		// The camera must be unlocked before the MediaRecorder can use it
-		unlockCamera();
+		unlockCamera(); // 如果使用MediaRecorder 那么要把Camera unlock掉
 
 		try {
 			mMediaRecorder = new MediaRecorder();
@@ -392,9 +392,11 @@ public abstract class VideoStream extends MediaStream {
 	protected void encodeWithMediaCodec() throws RuntimeException, IOException {
 		if (mMode == MODE_MEDIACODEC_API_2) {
 			// Uses the method MediaCodec.createInputSurface to feed the encoder
+			Log.d("TOM", "MODE_MEDIACODEC_API_2 Uses the method MediaCodec.createInputSurface to feed the encoder");
 			encodeWithMediaCodecMethod2();
 		} else {
 			// Uses dequeueInputBuffer to feed the encoder
+			Log.d("TOM", "MODE_MEDIACODEC_API   Uses dequeueInputBuffer to feed the encoder");
 			encodeWithMediaCodecMethod1();
 		}
 	}	
@@ -428,50 +430,115 @@ public abstract class VideoStream extends MediaStream {
 		EncoderDebugger debugger = EncoderDebugger.debug(mSettings, mQuality.resX, mQuality.resY);
 		final NV21Convertor convertor = debugger.getNV21Convertor();
 
+		/*
+		 * 初始化编码器
+		 * 
+			mediaCodec = MediaCodec.createEncoderByType("Video/AVC");  
+			MediaFormat mediaFormat = MediaFormat.createVideoFormat(type, width, height);  
+			mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, 125000);  
+			mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, 15);  
+			mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, 
+							MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar);  
+			mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);  
+			mediaCodec.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);  
+			mediaCodec.start();  
+		 * */
 		mMediaCodec = MediaCodec.createByCodecName(debugger.getEncoderName());
 		MediaFormat mediaFormat = MediaFormat.createVideoFormat("video/avc", mQuality.resX, mQuality.resY);
-		mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, mQuality.bitrate);
-		mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, mQuality.framerate);	
-		mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT,debugger.getEncoderColorFormat());
-		mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
+		mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, mQuality.bitrate); 	//	比特率
+		mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, mQuality.framerate);	//	帧率
+		mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT,debugger.getEncoderColorFormat()); //420SemiPanner 420Panner 420Packet
+		mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1); //关键帧间隔时间 单位s 
 		mMediaCodec.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
 		mMediaCodec.start();
-
+		
+		Log.d("TOM", "bitrate = " + mQuality.bitrate + " framerate = " + mQuality.framerate 
+						+ " resX = " + mQuality.resX + " resY = " + mQuality.resY 
+						+ " color format = " + debugger.getEncoderColorFormat() );
+		
+		/*
+		 * 	MTK平台 
+			D/TOM     ( 5016): MODE_MEDIACODEC_API   Uses dequeueInputBuffer to feed the encoder
+			D/TOM     ( 5016): measureFramerate Done　framerate　＝ 23
+			D/TOM     ( 5016): bitrate = 500000 framerate = 23 resX = 320 resY = 240
+	
+			小米5 晓龙820
+			bitrate = 500000 framerate = 22 resX = 320 resY = 240 color format = 19
+			// yuv420p MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar = 19 
+		 */
+		
+		
+		/*
+		 * 	Android 用MediaCodec实现视频硬解码  可以把NV21转成 H264编码
+		 * 
+		 */
+		
 		Camera.PreviewCallback callback = new Camera.PreviewCallback() {
 			long now = System.nanoTime()/1000, oldnow = now, i=0;
-			ByteBuffer[] inputBuffers = mMediaCodec.getInputBuffers();
+			ByteBuffer[] inputBuffers = mMediaCodec.getInputBuffers();   
 			@Override
 			public void onPreviewFrame(byte[] data, Camera camera) {
 				oldnow = now;
-				now = System.nanoTime()/1000;
+				now = System.nanoTime()/1000; 
+				// ns -> us 
+				// 1 s = 10^3 ms = 10^6 us = 10^9 ns  
+				
 				if (i++>3) {
 					i = 0;
 					//Log.d(TAG,"Measured: "+1000000L/(now-oldnow)+" fps.");
 				}
 				try {
+					//  int dequeueInputBuffer (long timeoutUs) 
 					int bufferIndex = mMediaCodec.dequeueInputBuffer(500000);
 					if (bufferIndex>=0) {
 						inputBuffers[bufferIndex].clear();
+						
+						/* 把 data 数据转换到  inputBuffers[bufferIndex]
+						 	摄像头默认是NV21格式,可以设置为YV12. 编码器一般支持YUV420P(I420)或者YUV420SP(NV12)
+						 	
+						 	I420: YYYYYYYY UU VV    =>YUV420P
+							YV12: YYYYYYYY VV UU    =>YVU420P
+							NV12: YYYYYYYY U V U V  =>YUV420SP
+							NV21: YYYYYYYY V U V U	=>YVU420SP
+
+						 	
+						*/ 
 						convertor.convert(data, inputBuffers[bufferIndex]);
+						
+						/*
+						 *  void android.media.MediaCodec.queueInputBuffer
+						 *  		(int index, int offset, int size, long presentationTimeUs, int flags) 
+						 */
+						 
+						// 送去编码   now 代表时间戳  是送去编码的时间
+						Log.d("TOM", "[" + bufferIndex + "] In = " + now );
 						mMediaCodec.queueInputBuffer(bufferIndex, 0, inputBuffers[bufferIndex].position(), now, 0);
 					} else {
 						Log.e(TAG,"No buffer available !");
 					}
 				} finally {
-					mCamera.addCallbackBuffer(data);
+					mCamera.addCallbackBuffer(data); // 把buffer给会Camera作preview
 				}				
 			}
 		};
 
+		// 给定Camera 10个buffer ??/ setPreviewCallbackWithBuffer是很有必要的，不然每次回调系统都重新分配缓冲区，效率会很低
 		for (int i=0;i<10;i++) mCamera.addCallbackBuffer(new byte[convertor.getBufferSize()]);
+		
+		// 设置回调函数
 		mCamera.setPreviewCallbackWithBuffer(callback);
 
 		// The packetizer encapsulates the bit stream in an RTP stream and send it over the network
 		mPacketizer.setDestination(mDestination, mRtpPort, mRtcpPort);
+		
+		// mPacketizer 的inputStream是 MediaCodec::getOutputBuffers
+		// MediaCodecInputStream::read会读取 MediaCodec输出的数据
 		mPacketizer.setInputStream(new MediaCodecInputStream(mMediaCodec));
-		mPacketizer.start();
+		mPacketizer.start(); 	// H264Packetizer implements Runnable
+								// run()
+		
 
-		mStreaming = true;
+		mStreaming = true; 	 // 代表已经启动摄像头  Packetizer已经准备接收编码后数据
 
 	}
 
@@ -507,9 +574,10 @@ public abstract class VideoStream extends MediaStream {
 		// The packetizer encapsulates the bit stream in an RTP stream and send it over the network
 		mPacketizer.setDestination(mDestination, mRtpPort, mRtcpPort);
 		mPacketizer.setInputStream(new MediaCodecInputStream(mMediaCodec));
-		mPacketizer.start();
+		mPacketizer.start(); 
+							
 
-		mStreaming = true;
+		mStreaming = true; 
 
 	}
 
@@ -555,7 +623,7 @@ public abstract class VideoStream extends MediaStream {
 			throw new InvalidSurfaceException("Invalid surface !");
 
 		if (mCamera == null) {
-			openCamera();
+			openCamera(); //	根据 mCameraId 打开一个摄像头Camere.open  mCamera
 			mUnlocked = false;
 			mCamera.setErrorCallback(new Camera.ErrorCallback() {
 				@Override
@@ -579,15 +647,19 @@ public abstract class VideoStream extends MediaStream {
 				// If the phone has a flash, we turn it on/off according to mFlashEnabled
 				// setRecordingHint(true) is a very nice optimisation if you plane to only use the Camera for recording
 				Parameters parameters = mCamera.getParameters();
-				if (parameters.getFlashMode()!=null) {
+				if (parameters.getFlashMode()!=null) { // 是否打开闪光
 					parameters.setFlashMode(mFlashEnabled?Parameters.FLASH_MODE_TORCH:Parameters.FLASH_MODE_OFF);
 				}
+				//	?? 如果你的应用是专为录像写的，那么在启动你的预览之前调用setRecordingHint(boolean)并传入true，这样可以帮你减少启动录制的时间
+				//		直接用录像的分辨率预览 ???
 				parameters.setRecordingHint(true);
 				mCamera.setParameters(parameters);
 				mCamera.setDisplayOrientation(mOrientation);
 
 				try {
 					if (mMode == MODE_MEDIACODEC_API_2) {
+						//	encoded using the MediaCodec API with a surface.
+						//	
 						mSurfaceView.startGLThread();
 						mCamera.setPreviewTexture(mSurfaceView.getSurfaceTexture());
 					} else {
@@ -629,10 +701,13 @@ public abstract class VideoStream extends MediaStream {
 		}
 
 		Parameters parameters = mCamera.getParameters();
+		// public final static VideoQuality DEFAULT_VIDEO_QUALITY = new VideoQuality(1280,720,20,500000);
+		// 要修改这个  设置参数无关
+		// 获得摄像头支持的参数 选择 与目标分辨率mQuality 差距最小的那个
 		mQuality = VideoQuality.determineClosestSupportedResolution(parameters, mQuality);
 		int[] max = VideoQuality.determineMaximumSupportedFramerate(parameters);
 		parameters.setPreviewFormat(mCameraImageFormat);
-		parameters.setPreviewSize(mQuality.resX, mQuality.resY);
+		parameters.setPreviewSize(mQuality.resX, mQuality.resY); // 无论是编码MediaCodec 还是 Camera的分辨率都是一样 
 		parameters.setPreviewFpsRange(max[0], max[1]);
 
 		try {
@@ -677,7 +752,7 @@ public abstract class VideoStream extends MediaStream {
 	 * Blocks the thread in which this function is called.
 	 */
 	private void measureFramerate() {
-		final Semaphore lock = new Semaphore(0);
+		final Semaphore lock = new Semaphore(0); // 创建信号量
 
 		final Camera.PreviewCallback callback = new Camera.PreviewCallback() {
 			int i = 0, t = 0;
@@ -692,16 +767,17 @@ public abstract class VideoStream extends MediaStream {
 				}
 				if (i>20) {
 					mQuality.framerate = (int) (1000000/(t/count)+1);
-					lock.release();
+					Log.d("TOM", "measureFramerate Done　framerate　＝ " + mQuality.framerate );
+					lock.release();//	信号量-释放
 				}
-				oldnow = now;
+				oldnow = now; // 测试摄像头的帧率
 			}
 		};
 
 		mCamera.setPreviewCallback(callback);
 
 		try {
-			lock.tryAcquire(2,TimeUnit.SECONDS);
+			lock.tryAcquire(2,TimeUnit.SECONDS);//	信号量-获取
 			Log.d(TAG,"Actual framerate: "+mQuality.framerate);
 			if (mSettings != null) {
 				Editor editor = mSettings.edit();

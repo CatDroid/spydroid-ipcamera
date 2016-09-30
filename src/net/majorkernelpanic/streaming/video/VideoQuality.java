@@ -36,7 +36,7 @@ public class VideoQuality {
 	public final static String TAG = "VideoQuality";
 	
 	/** Default video stream quality. */
-	public final static VideoQuality DEFAULT_VIDEO_QUALITY = new VideoQuality(176,144,20,500000);
+	public final static VideoQuality DEFAULT_VIDEO_QUALITY = new VideoQuality(1280,720,20,500000);
 
 	/**	Represents a quality for a video stream. */ 
 	public VideoQuality() {}
@@ -84,8 +84,8 @@ public class VideoQuality {
 
 	public static VideoQuality parseQuality(String str) {
 		VideoQuality quality = DEFAULT_VIDEO_QUALITY.clone();
-		if (str != null) {
-			String[] config = str.split("-");
+		if (str != null) { 
+			String[] config = str.split("-"); // 116400-15-800-480
 			try {
 				quality.bitrate = Integer.parseInt(config[0])*1000; // conversion to bit/s
 				quality.framerate = Integer.parseInt(config[1]);
@@ -105,19 +105,19 @@ public class VideoQuality {
 		VideoQuality v = quality.clone();
 		int minDist = Integer.MAX_VALUE;
 		String supportedSizesStr = "Supported resolutions: ";
-		List<Size> supportedSizes = parameters.getSupportedPreviewSizes();
+		List<Size> supportedSizes = parameters.getSupportedPreviewSizes(); // 获取支持的预览分辨率 
 		for (Iterator<Size> it = supportedSizes.iterator(); it.hasNext();) {
 			Size size = it.next();
 			supportedSizesStr += size.width+"x"+size.height+(it.hasNext()?", ":"");
 			int dist = Math.abs(quality.resX - size.width);
-			if (dist<minDist) {
+			if (dist<minDist) { // 选择差距最小的(宽度)
 				minDist = dist;
 				v.resX = size.width;
 				v.resY = size.height;
 			}
 		}
 		Log.v(TAG, supportedSizesStr);
-		if (quality.resX != v.resX || quality.resY != v.resY) {
+		if (quality.resX != v.resX || quality.resY != v.resY) { // 可能不支持该预览分辨率
 			Log.v(TAG,"Resolution modified: "+quality.resX+"x"+quality.resY+"->"+v.resX+"x"+v.resY);
 		}
 		

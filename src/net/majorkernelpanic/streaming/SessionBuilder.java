@@ -35,6 +35,7 @@ import net.majorkernelpanic.streaming.video.VideoStream;
 import android.content.Context;
 import android.hardware.Camera.CameraInfo;
 import android.preference.PreferenceManager;
+import android.util.Log;
 
 /**
  * Call {@link #getInstance()} to get access to the SessionBuilder.
@@ -111,23 +112,27 @@ public class SessionBuilder {
 		session.setTimeToLive(mTimeToLive);
 		session.setCallback(mCallback);
 
-		switch (mAudioEncoder) {
+		switch (mAudioEncoder) {  
 		case AUDIO_AAC:
+			Log.d("TOM", "AUDIO_AAC");
 			AACStream stream = new AACStream();
 			session.addAudioTrack(stream);
 			if (mContext!=null) 
 				stream.setPreferences(PreferenceManager.getDefaultSharedPreferences(mContext));
 			break;
 		case AUDIO_AMRNB:
+			Log.d("TOM", "AUDIO_AMRNB");
 			session.addAudioTrack(new AMRNBStream());
 			break;
 		}
 
 		switch (mVideoEncoder) {
 		case VIDEO_H263:
+			Log.d("TOM", "VIDEO_H263");
 			session.addVideoTrack(new H263Stream(mCamera));
 			break;
-		case VIDEO_H264:
+		case VIDEO_H264: 
+			Log.d("TOM", "VIDEO_H264");
 			H264Stream stream = new H264Stream(mCamera);
 			if (mContext!=null) 
 				stream.setPreferences(PreferenceManager.getDefaultSharedPreferences(mContext));
@@ -137,17 +142,20 @@ public class SessionBuilder {
 
 		if (session.getVideoTrack()!=null) {
 			VideoStream video = session.getVideoTrack();
-			video.setFlashState(mFlash);
-			video.setVideoQuality(mVideoQuality);
-			video.setSurfaceView(mSurfaceView);
+			video.setFlashState(mFlash); // 是否开闪光
+			video.setVideoQuality(mVideoQuality); 	// 视频参数 116200bps--15fps-800px-480px
+													// 音频参数 116200bps -- 44.1kHz
+			video.setSurfaceView(mSurfaceView);		// 显示
 			video.setPreviewOrientation(mOrientation);
-			video.setDestinationPorts(5006);
+			video.setDestinationPorts(5006); // 视频的目标端口5006 音频的目标端口是5004
 		}
-
+		//	
+		//	视频 客户端 用 5006端口作为rtp  5007端口作为rtcp
+		//	音频 客户端 用 5004端口作为rtp  5005端口作为rtcp
 		if (session.getAudioTrack()!=null) {
 			AudioStream audio = session.getAudioTrack();
-			audio.setAudioQuality(mAudioQuality);
-			audio.setDestinationPorts(5004);
+			audio.setAudioQuality(mAudioQuality); 
+			audio.setDestinationPorts(5004); 
 		}
 
 		return session;

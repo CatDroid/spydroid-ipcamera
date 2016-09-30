@@ -73,6 +73,8 @@ public class H264Stream extends VideoStream {
 		mMimeType = "video/avc";
 		mCameraImageFormat = ImageFormat.NV21;
 		mVideoEncoder = MediaRecorder.VideoEncoder.H264;
+		
+		// 创建H264打包器  start()时候 设置 pps sps 参数
 		mPacketizer = new H264Packetizer();
 	}
 
@@ -96,6 +98,7 @@ public class H264Stream extends VideoStream {
 			byte[] pps = Base64.decode(mConfig.getB64PPS(), Base64.NO_WRAP);
 			byte[] sps = Base64.decode(mConfig.getB64SPS(), Base64.NO_WRAP);
 			((H264Packetizer)mPacketizer).setStreamParameters(pps, sps);
+			// H264打包器  保存着 pps图像参数集    sps序列参数集
 			super.start();
 		}
 	}
@@ -130,7 +133,10 @@ public class H264Stream extends VideoStream {
 				mMode = MODE_MEDIARECORDER_API;
 			}
 			EncoderDebugger debugger = EncoderDebugger.debug(mSettings, mQuality.resX, mQuality.resY);
-			return new MP4Config(debugger.getB64SPS(), debugger.getB64PPS());
+			return new MP4Config(debugger.getB64SPS(), debugger.getB64PPS()); 
+			//	获得 sps pps 
+			//	Sequence Parameter Sets (SPS) 和Picture Parameter Set (PPS)
+			//
 		} catch (Exception e) {
 			// Fallback on the old streaming method using the MediaRecorder API
 			Log.e(TAG,"Resolution not supported with the MediaCodec API, we fallback on the old streamign method.");

@@ -137,12 +137,14 @@ public class OptionsActivity extends PreferenceActivity {
 		videoResolution.setOnPreferenceChangeListener(new Preference.OnPreferenceChangeListener() {
 			public boolean onPreferenceChange(Preference preference, Object newValue) {
 				Editor editor = settings.edit();
+				
+				// 始终正则表达式
 				Pattern pattern = Pattern.compile("([0-9]+)x([0-9]+)");
 				Matcher matcher = pattern.matcher((String)newValue);
 				matcher.find();
 				editor.putInt("video_resX", Integer.parseInt(matcher.group(1)));
 				editor.putInt("video_resY", Integer.parseInt(matcher.group(2)));
-				editor.commit();
+				editor.commit(); // 保存在SharedPrefence.xml中
 				videoResolution.setSummary(getString(R.string.settings0)+" "+(String)newValue+"px");
 				return true;
 			}

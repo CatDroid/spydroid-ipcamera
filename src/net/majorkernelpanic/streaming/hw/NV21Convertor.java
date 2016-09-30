@@ -119,7 +119,7 @@ public class NV21Convertor {
 		if (!mPlanar) {
 			if (mSliceHeight==mHeight && mStride==mWidth) {
 				// Swaps U and V
-				if (!mPanesReversed) {
+				if (!mPanesReversed) { // 交换 U 和 V
 					for (int i = mSize; i < mSize+mSize/2; i += 2) {
 						mBuffer[0] = data[i+1];
 						data[i+1] = data[i];
@@ -127,7 +127,7 @@ public class NV21Convertor {
 					}
 				}
 				if (mYPadding>0) {
-					System.arraycopy(data, 0, mBuffer, 0, mSize);
+					System.arraycopy(data, 0, mBuffer, 0, mSize); // Y 直接拷贝
 					System.arraycopy(data, mSize, mBuffer, mSize+mYPadding, mSize/2);
 					return mBuffer;
 				}

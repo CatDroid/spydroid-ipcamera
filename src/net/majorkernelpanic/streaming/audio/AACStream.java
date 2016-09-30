@@ -172,7 +172,7 @@ public class AACStream extends AudioStream {
 
 			mProfile = 2; // AAC LC
 			mChannel = 1;
-			mConfig = mProfile<<11 | mSamplingRateIndex<<7 | mChannel<<3;
+			mConfig = mProfile<<11 | mSamplingRateIndex<<7 | mChannel<<3; // ESDS 
 
 			mSessionDescription = "m=audio "+String.valueOf(getDestinationPorts()[0])+" RTP/AVP 96\r\n" +
 					"a=rtpmap:96 mpeg4-generic/"+mQuality.samplingRate+"\r\n"+

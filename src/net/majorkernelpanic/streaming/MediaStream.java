@@ -122,7 +122,7 @@ public abstract class MediaStream implements Stream {
 	 */
 	public void setDestinationPorts(int rtpPort, int rtcpPort) {
 		mRtpPort = rtpPort;
-		mRtcpPort = rtcpPort;
+		mRtcpPort = rtcpPort; // client_port
 	}	
 
 	/**
@@ -218,12 +218,14 @@ public abstract class MediaStream implements Stream {
 		if (mRtpPort<=0 || mRtcpPort<=0)
 			throw new IllegalStateException("No destination ports set for the stream !");
 
-		mPacketizer.setTimeToLive(mTTL);
+		mPacketizer.setTimeToLive(mTTL);// 设置对应的Packetizer打包器的mTTL 用在multiCast
 		
-		if (mMode != MODE_MEDIARECORDER_API) {
-			encodeWithMediaCodec();
-		} else {
-			encodeWithMediaRecorder();
+		if (mMode != MODE_MEDIARECORDER_API) { 
+			Log.d("TIM", "encodeWithMediaCodec");
+			encodeWithMediaCodec(); // 使用 MediaCodec 编码  对于视频流 还会区分 MODE_MEDIACODEC_API/MODE_MEDIACODEC_API_2
+		} else {					// Camera.open Camera.startPreview Camera.setPreviewCallback onFramexxx MediaCodec
+			Log.d("TIM", "encodeWithMediaRecorder");
+			encodeWithMediaRecorder(); // 使用 MediaRecorder 编码  VLC错误
 		}
 
 	}

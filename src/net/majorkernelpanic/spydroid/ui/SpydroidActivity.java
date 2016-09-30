@@ -117,6 +117,7 @@ public class SpydroidActivity extends FragmentActivity {
 		PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
 		mWakeLock = pm.newWakeLock(PowerManager.FULL_WAKE_LOCK, "net.majorkernelpanic.spydroid.wakelock");
 
+		// 启动 http rtsp服务
 		// Starts the service of the HTTP server
 		this.startService(new Intent(this,CustomHttpServer.class));
 
@@ -149,6 +150,7 @@ public class SpydroidActivity extends FragmentActivity {
 			removeNotification();
 		}
 
+		// 绑定 http rtsp服务
 		bindService(new Intent(this,CustomHttpServer.class), mHttpServiceConnection, Context.BIND_AUTO_CREATE);
 		bindService(new Intent(this,CustomRtspServer.class), mRtspServiceConnection, Context.BIND_AUTO_CREATE);
 
@@ -211,7 +213,7 @@ public class SpydroidActivity extends FragmentActivity {
 			startActivityForResult(intent, 0);
 			return true;
 		case R.id.quit:
-			quitSpydroid();
+			quitSpydroid(); // 这样才会退出服务
 			return true;
 		default:
 			return super.onOptionsItemSelected(item);

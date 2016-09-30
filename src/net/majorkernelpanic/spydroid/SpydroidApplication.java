@@ -104,7 +104,10 @@ public class SpydroidApplication extends android.app.Application {
 		.setContext(getApplicationContext())
 		.setAudioEncoder(!settings.getBoolean("stream_audio", true)?0:audioEncoder)
 		.setVideoEncoder(!settings.getBoolean("stream_video", false)?0:videoEncoder)
-		.setVideoQuality(videoQuality);
+		.setVideoQuality(videoQuality); // SessionBuilder::clone
+		// 1. 从sharedpreference中获取 视频参数 encoder/x/y/framerate/bitrate 并把videoQuality实例给到SessionBuilder
+		// 2. 如果shraredPreference参数修改  mOnSharedPreferenceChangeListener 将修改 videoQuality
+		// ???
 
 		// Listens to changes of preferences
 		settings.registerOnSharedPreferenceChangeListener(mOnSharedPreferenceChangeListener);

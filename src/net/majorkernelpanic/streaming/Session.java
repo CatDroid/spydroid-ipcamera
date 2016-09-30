@@ -116,6 +116,8 @@ public class Session {
 
 	static {
 		// Creates the Thread that will be used when asynchronous methods of a Session are called
+		// CountDownLatch是一个同步工具类,它允许一个或多个线程一直等待,直到其他线程的操作执行完后再执行
+		//
 		sSignal = new CountDownLatch(1);
 		new HandlerThread("net.majorkernelpanic.streaming.Session"){
 			@Override
@@ -131,6 +133,9 @@ public class Session {
 	 */
 	public Session() {
 		long uptime = System.currentTimeMillis();
+		
+		// Returns the application's main looper, which lives in the main thread of the application.
+		//
 		mMainHandler = new Handler(Looper.getMainLooper());
 		mTimestamp = (uptime/1000)<<32 & (((uptime-((uptime/1000)*1000))>>32)/1000); // NTP timestamp
 		mOrigin = "127.0.0.1";
@@ -138,6 +143,11 @@ public class Session {
 		// Me make sure that we won't send Runnables to a non existing thread
 		try {
 			sSignal.await();
+			/*
+			 * 除非中断 否则等待计数为0
+
+
+			 */
 		} catch (InterruptedException e) {}
 	}
 
@@ -189,8 +199,8 @@ public class Session {
 
 	/** You probably don't need to use that directly, use the {@link SessionBuilder}. */
 	void addAudioTrack(AudioStream track) {
-		removeAudioTrack();
-		mAudioStream = track;
+		removeAudioTrack(); 	// 关闭原来的Stream (stop/stopPreview)  
+		mAudioStream = track;	// mAudioStream/mVideoStream  设置为新值
 	}
 
 	/** You probably don't need to use that directly, use the {@link SessionBuilder}. */
@@ -339,7 +349,13 @@ public class Session {
 		if (mAudioStream != null) {
 			sessionDescription.append(mAudioStream.getSessionDescription());
 			sessionDescription.append("a=control:trackID="+0+"\r\n");
+			/* 获得audio/video streamd的会话描述 
+			 * m=video 5006 RTP/AVP 96  //video指明是视频信息， 5006是指客户端VLC接收视频信息的udp端口号
+			 */
 		}
+		//
+		//	如果有mAudioStream或者 mVideoStream的话, 就有对应的trackID=0/1
+		//	
 		if (mVideoStream != null) {
 			sessionDescription.append(mVideoStream.getSessionDescription());
 			sessionDescription.append("a=control:trackID="+1+"\r\n");
@@ -388,7 +404,7 @@ public class Session {
 	 * {@link Callback#onSessionError(int, int, Exception)} when
 	 * an error occurs.	
 	 **/
-	public void syncConfigure()  
+	public void syncConfigure() // 调用对应Stream的configure
 			throws CameraInUseException, 
 			StorageUnavailableException,
 			ConfNotSupportedException, 
@@ -400,7 +416,7 @@ public class Session {
 			Stream stream = id==0 ? mAudioStream : mVideoStream;
 			if (stream!=null && !stream.isStreaming()) {
 				try {
-					stream.configure();
+					stream.configure(); // 调用对应Audio/VideoStream的configure()
 				} catch (CameraInUseException e) {
 					postError(ERROR_CAMERA_ALREADY_IN_USE , id, e);
 					throw e;
@@ -444,7 +460,7 @@ public class Session {
 	 * Throws exceptions in addition to calling a callback.
 	 * @param id The id of the stream to start
 	 **/
-	public void syncStart(int id) 			
+	public void syncStart(int id) 		// 调用Stream的 start()
 			throws CameraInUseException, 
 			StorageUnavailableException,
 			ConfNotSupportedException, 

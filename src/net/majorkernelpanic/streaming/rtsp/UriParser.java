@@ -44,6 +44,7 @@ import org.apache.http.NameValuePair;
 import org.apache.http.client.utils.URLEncodedUtils;
 
 import android.hardware.Camera.CameraInfo;
+import android.util.Log;
 
 /**
  * This class parses URIs received by the RTSP server and configures a Session accordingly.
@@ -52,7 +53,8 @@ public class UriParser {
 
 	public final static String TAG = "UriParser";
 	
-	/**
+	/**  支持的URL格式
+	 * 
 	 * Configures a Session according to the given URI.
 	 * Here are some examples of URIs that can be used to configure a Session:
 	 * <ul><li>rtsp://xxx.xxx.xxx.xxx:8086?h264&flash=on</li>
@@ -63,6 +65,10 @@ public class UriParser {
 	 * @throws IllegalStateException
 	 * @throws IOException
 	 * @return A Session configured according to the URI
+	 * 
+	 * 
+	 * rtsp://192.168.43.1:8086?h264&aac&videoapi=mc&audioapi=mc/
+	 * 
 	 */
 	public static Session parse(String uri) throws IllegalStateException, IOException {		
 		SessionBuilder builder = SessionBuilder.getInstance().clone();
@@ -71,10 +77,12 @@ public class UriParser {
 		List<NameValuePair> params = URLEncodedUtils.parse(URI.create(uri),"UTF-8");
 		if (params.size()>0) {
 
+			// 设置默认的 encoder都是none
 			builder.setAudioEncoder(AUDIO_NONE).setVideoEncoder(VIDEO_NONE);
 
 			// Those parameters must be parsed first or else they won't necessarily be taken into account
 			for (Iterator<NameValuePair> it = params.iterator();it.hasNext();) {
+				// 遍历URL参数
 				NameValuePair param = it.next();
 
 				// FLASH ON/OFF
@@ -109,30 +117,33 @@ public class UriParser {
 					}
 					else {
 						// Default multicast address
-						builder.setDestination("228.5.6.7");
+						// 默认的组播地址  multicast=228.5.6.7  也就是会往这个ip地址发送数据
+						builder.setDestination("228.5.6.7"); 
 					}
 				}
 
 				// UNICAST -> the client can use this to specify where he wants the stream to be sent
 				else if (param.getName().equalsIgnoreCase("unicast")) {
 					if (param.getValue()!=null) {
-						builder.setDestination(param.getValue());
+						builder.setDestination(param.getValue()); // 单播地址  unicast=192.168.1.1
 					}					
 				}
 				
 				// VIDEOAPI -> can be used to specify what api will be used to encode video (the MediaRecorder API or the MediaCodec API)
 				else if (param.getName().equalsIgnoreCase("videoapi")) {
+					Log.d("TIM", "videoapi param.getValue() = " + param.getValue() );
 					if (param.getValue()!=null) {
 						if (param.getValue().equalsIgnoreCase("mr")) {
 							videoApi = MediaStream.MODE_MEDIARECORDER_API;
 						} else if (param.getValue().equalsIgnoreCase("mc")) {
 							videoApi = MediaStream.MODE_MEDIACODEC_API;
-						}
+						} // 视频和音频流 使用 MediaRecorder 还是 使用  MediaCodec 的API
 					}					
 				}
 				
 				// AUDIOAPI -> can be used to specify what api will be used to encode audio (the MediaRecorder API or the MediaCodec API)
 				else if (param.getName().equalsIgnoreCase("audioapi")) {
+					Log.d("TIM", "audioapi param.getValue() = " + param.getValue() );
 					if (param.getValue()!=null) {
 						if (param.getValue().equalsIgnoreCase("mr")) {
 							audioApi = MediaStream.MODE_MEDIARECORDER_API;
@@ -157,7 +168,8 @@ public class UriParser {
 				}
 
 				// H.264
-				else if (param.getName().equalsIgnoreCase("h264")) {
+				else if (param.getName().equalsIgnoreCase("h264")) { 	// 	h264=116400-15-800-480
+																		//	h264  param.getValue()=null
 					VideoQuality quality = VideoQuality.parseQuality(param.getValue());
 					builder.setVideoQuality(quality).setVideoEncoder(VIDEO_H264);
 				}
@@ -175,7 +187,7 @@ public class UriParser {
 				}
 
 				// AAC
-				else if (param.getName().equalsIgnoreCase("aac")) {
+				else if (param.getName().equalsIgnoreCase("aac")) {// acc=116400-44100
 					AudioQuality quality = AudioQuality.parseQuality(param.getValue());
 					builder.setAudioQuality(quality).setAudioEncoder(AUDIO_AAC);
 				}
@@ -186,11 +198,18 @@ public class UriParser {
 
 		if (builder.getVideoEncoder()==VIDEO_NONE && builder.getAudioEncoder()==AUDIO_NONE) {
 			SessionBuilder b = SessionBuilder.getInstance();
-			builder.setVideoEncoder(b.getVideoEncoder());
-			builder.setAudioEncoder(b.getAudioEncoder());
+			builder.setVideoEncoder(b.getVideoEncoder()); // 只支持H264 H263
+			builder.setAudioEncoder(b.getAudioEncoder()); // 只支持ACC AMRNB
+			/*  url两个都没有的话  就 设置城
+			 	默认的 视频编码是H263 音频编码是 AMARNB
+				private int mVideoEncoder = VIDEO_H263; 
+				private int mAudioEncoder = AUDIO_AMRNB;
+			 */
 		}
 
-		Session session = builder.build();
+		Session session = builder.build(); 
+		// 创建一个session  根据上述给到builder的参数 创建session并创建AudioStream VideoStream关联到这个session
+		// 返回到 UriParser.parse
 		
 		if (videoApi>0 && session.getVideoTrack() != null) {
 			session.getVideoTrack().setStreamingMethod(videoApi);

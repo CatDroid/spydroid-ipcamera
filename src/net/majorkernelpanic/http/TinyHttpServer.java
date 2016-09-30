@@ -263,7 +263,7 @@ public class TinyHttpServer extends Service {
 		}
 		// Starts the HTTP server if needed
 		if (mHttpEnabled && mHttpRequestListener == null) {
-			try {
+			try { // 对 8080 端口 socket http服务端
 				mHttpRequestListener = new HttpRequestListener(mHttpPort);
 			} catch (Exception e) {
 				mHttpRequestListener = null;
@@ -271,7 +271,7 @@ public class TinyHttpServer extends Service {
 		}
 		// Starts the HTTPS server if needed
 		if (mHttpsEnabled && mHttpsRequestListener == null) {
-			try {
+			try {// 对  8443  端口 socket https服务端
 				mHttpsRequestListener = new HttpsRequestListener(mHttpsPort);
 			} catch (Exception e) {
 				mHttpsRequestListener = null;
@@ -439,7 +439,8 @@ public class TinyHttpServer extends Service {
 	protected class HttpRequestListener extends RequestListener {
 
 		public HttpRequestListener(final int port) throws Exception {
-			try {
+			// 没有super 自动调用 RequestListener 无参构造
+			try { 
 				ServerSocket serverSocket = new ServerSocket(port);
 				construct(serverSocket);
 				Log.i(TAG,"HTTP server listening on port " + serverSocket.getLocalPort());
@@ -604,15 +605,17 @@ public class TinyHttpServer extends Service {
 			while (!Thread.interrupted()) {
 				try {
 					// Set up HTTP connection
-					Socket socket = this.mServerSocket.accept();
+					Socket socket = this.mServerSocket.accept();// 等待一个客户链接
 					DefaultHttpServerConnection conn = new DefaultHttpServerConnection();
 					Log.d(TAG,"Incoming connection from " + socket.getInetAddress());
-					conn.bind(socket, mParams);
+					conn.bind(socket, mParams); // 这个HttpServerConnection处理socket client的请求
 
 					// Start worker thread
 					Thread t = new WorkerThread(this.mHttpService, conn, socket);
 					t.setDaemon(true);
-					t.start();
+								// 1.当JVM中所有的线程都是守护线程的时候，JVM就可以退出了；如果还有一个 或以上的非守护线程则JVM不会退出
+								// 2.反复调用run()
+					t.start(); // 启动一个线程处理
 				} catch (SocketException e) {
 					break;
 				} catch (InterruptedIOException ex) {

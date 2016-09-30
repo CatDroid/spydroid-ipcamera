@@ -60,14 +60,14 @@ public class CodecManager {
 	 */
 	@SuppressLint("NewApi")
 	public synchronized static Codec[] findEncodersForMimeType(String mimeType) {
-		if (sEncoders != null) return sEncoders;
+		if (sEncoders != null) return sEncoders; // BUG:如果mimeType跟上一次不一样的话   这里还是放回上次mime的那个
 
 		ArrayList<Codec> encoders = new ArrayList<Codec>();
 
 		// We loop through the encoders, apparently this can take up to a sec (testes on a GS3)
 		for(int j = MediaCodecList.getCodecCount() - 1; j >= 0; j--){
 			MediaCodecInfo codecInfo = MediaCodecList.getCodecInfoAt(j);
-			if (!codecInfo.isEncoder()) continue;
+			if (!codecInfo.isEncoder()) continue; // 过滤掉 解码器
 
 			String[] types = codecInfo.getSupportedTypes();
 			for (int i = 0; i < types.length; i++) {
@@ -93,6 +93,16 @@ public class CodecManager {
 						Log.wtf(TAG,e);
 					}
 				}
+				/*
+				 *   <MediaCodec name="OMX.MTK.VIDEO.ENCODER.AVC" type="video/avc" >
+					      <Limit name="size" min="128x96" max="1920x1080" />
+					      <Limit name="alignment" value="16x16" />
+					      <Limit name="block-size" value="16x16" />
+					      <Quirk name="requires-allocate-on-input-ports" />
+					      <Quirk name="requires-allocate-on-output-ports" />
+					  </MediaCodec>
+				 * 
+				 * */
 			}
 		}
 

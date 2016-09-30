@@ -46,9 +46,9 @@ abstract public class AbstractPacketizer {
 	protected long ts = 0;
 
 	public AbstractPacketizer() {
-		int ssrc = new Random().nextInt();
+		int ssrc = new Random().nextInt(); // ssrc是一个随机值
 		ts = new Random().nextInt();
-		socket = new RtpSocket();
+		socket = new RtpSocket(); // 由本Packetizer创建了RtpSocket 
 		socket.setSSRC(ssrc);
 	}
 

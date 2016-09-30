@@ -39,7 +39,7 @@ public class SenderReport {
 	private MulticastSocket usock;
 	private DatagramPacket upack;
 
-	private byte[] buffer = new byte[MTU];
+	private byte[] buffer = new byte[MTU]; //  rtcp每次都用这个buffer来承载DatagramPacket 
 	private int ssrc, port = -1;
 	private int octetCount = 0, packetCount = 0;
 	private long interval, delta, now, oldnow;
@@ -107,14 +107,15 @@ public class SenderReport {
 	public void update(int length, long ntpts, long rtpts) throws IOException {
 		packetCount += 1;
 		octetCount += length;
-		setLong(packetCount, 20, 24);
+		setLong(packetCount, 20, 24);// buffer[24]~buffer[20] 存放packetCount
+									 //  L      ---   H byte
 		setLong(octetCount, 24, 28);
 
 		now = SystemClock.elapsedRealtime();
-		delta += oldnow != 0 ? now-oldnow : 0;
+		delta += oldnow != 0 ? now-oldnow : 0; // 上一次update的时间
 		oldnow = now;
 		if (interval>0) {
-			if (delta>=interval) {
+			if (delta>=interval) { // 两次update的时间 大于 指定间隔interval
 				// We send a Sender Report
 				send(ntpts,rtpts);
 				delta = 0;
@@ -175,8 +176,8 @@ public class SenderReport {
 		setLong(hb, 8, 12);
 		setLong(lb, 12, 16);
 		setLong(rtpts, 16, 20);
-		upack.setLength(28);
-		usock.send(upack);		
+		upack.setLength(28); // 包长度 28 字节
+		usock.send(upack);	 // MutliSocket::send发送包
 	}
 		
 	

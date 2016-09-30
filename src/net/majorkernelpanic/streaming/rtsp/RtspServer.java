@@ -26,6 +26,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.BindException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
@@ -64,7 +65,7 @@ public class RtspServer extends Service {
 	public static String SERVER_NAME = "MajorKernelPanic RTSP Server";
 
 	/** Port used by default. */
-	public static final int DEFAULT_RTSP_PORT = 8086;
+	public static final int DEFAULT_RTSP_PORT = 8086; // 没有root权限 必须大于10000 e.g 10086 不能 xxxx
 
 	/** Port already in use. */
 	public final static int ERROR_BIND_FAILED = 0x00;
@@ -155,12 +156,15 @@ public class RtspServer extends Service {
 	 * of the server has been modified) the RTSP server. 
 	 */
 	public void start() {
-		if (!mEnabled || mRestart) stop();
+		Log.d(TAG,"start   mEnabled = " + mEnabled + " mRestart = " + mRestart);
+		if (!mEnabled || mRestart) stop(); // 如果设置中没有打开rtsp服务的话 这里不会启动rtsp服务线程
 		if (mEnabled && mListenerThread == null) {
 			try {
 				mListenerThread = new RequestListener();
 			} catch (Exception e) {
 				mListenerThread = null;
+				e.printStackTrace();
+				Log.e(TAG,"Excpetion ! e = " + e.getMessage());
 			}
 		}
 		mRestart = false;
@@ -223,8 +227,10 @@ public class RtspServer extends Service {
 		mSharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
 		mPort = Integer.parseInt(mSharedPreferences.getString(KEY_PORT, String.valueOf(mPort)));
 		mEnabled = mSharedPreferences.getBoolean(KEY_ENABLED, mEnabled);
+		// 在设置中 设置 是否打开 rtsp服务和端口号
+		// sharedPreferences中如果属性改变的话 调用 mOnSharedPreferenceChangeListener 
 
-		// If the configuration is modified, the server will adjust
+		// If the configuration is modified, the server will adjust rtsp的设置改变了(启用/关闭 端口号)
 		mSharedPreferences.registerOnSharedPreferenceChangeListener(mOnSharedPreferenceChangeListener);
 
 		start();
@@ -267,7 +273,7 @@ public class RtspServer extends Service {
 		return mBinder;
 	}
 
-	protected void postMessage(int id) {
+	protected void postMessage(int id) { // 发给RtspServer::addCallbackListener
 		synchronized (mListeners) {
 			if (mListeners.size() > 0) {
 				for (CallbackListener cl : mListeners) {
@@ -295,11 +301,11 @@ public class RtspServer extends Service {
 	 * @return A proper session
 	 */
 	protected Session handleRequest(String uri, Socket client) throws IllegalStateException, IOException {
-		Session session = UriParser.parse(uri);
+		Session session = UriParser.parse(uri); // 通过SessionBuilder创建Session
 		session.setOrigin(client.getLocalAddress().getHostAddress());
 		if (session.getDestination()==null) {
 			session.setDestination(client.getInetAddress().getHostAddress());
-		}
+		} // DESCRIBE rtsp://192.168.1.60:8086/ RTSP/1.0
 		return session;
 	}
 	
@@ -308,29 +314,68 @@ public class RtspServer extends Service {
 		private final ServerSocket mServer;
 
 		public RequestListener() throws IOException {
+			this.setName("RequSer" + mPort );
+			
 			try {
-				mServer = new ServerSocket(mPort);
-				start();
+				Log.d(TAG,"mPort = " + mPort);
+				mServer = new ServerSocket();
+				Log.d(TAG,"try Start");
+				start(); // 自己启动线程run
+				Log.d(TAG,"rtsp start = " + mServer);
 			} catch (BindException e) {
 				Log.e(TAG,"Port already in use !");
 				postError(e, ERROR_BIND_FAILED);
 				throw e;
-			}
+			} 
+			
+			
+//			catch (SocketException e){
+//				e.printStackTrace();
+//				Log.e(TAG,"SocketException ! e = " + e.getMessage());
+//				throw e;
+//			} 
+			// 问题1:
+			// 小米5 禁止应用访问 数据网络  而当前如果用 数据网络的话 就会出现 SocketException Access Permisson Denied
+			
+			// 问题2:
+			// android.os.StrictMode$AndroidBlockGuardPolicy.onNetwork
+			// Android3.0不允许在主线程访问网络
+			// 把绑定的动作放在 run 线程中
 		}
 
 		public void run() {
-			Log.i(TAG,"RTSP server listening on port "+mServer.getLocalPort());
+			
+			try {
+				//mServer.setReuseAddress(true);
+				mServer.bind(new InetSocketAddress(mPort) );
+				Log.d(TAG,"rtsp run = " + mServer);
+			} catch (IOException e1) {
+				Log.e(TAG,"ListenerThread Bind Error 1");
+				try {
+					mServer.close();
+					mListenerThread = null;
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+				Log.e(TAG,"ListenerThread Bind Error 2");
+				e1.printStackTrace();
+				return ;
+				
+			}
+			
+			Log.d(TAG,"RTSP server listening on port "+mServer.getLocalPort());
 			while (!Thread.interrupted()) {
 				try {
-					new WorkerThread(mServer.accept()).start();
+					new WorkerThread(mServer.accept()).start();// 每个client连接对应一个WorkerThread
 				} catch (SocketException e) {
 					break;
 				} catch (IOException e) {
 					Log.e(TAG,e.getMessage());
 					continue;
 				}
+				Log.d(TAG,"RTSP server continue listening  " );
 			}
-			Log.i(TAG,"RTSP server stopped !");
+			Log.d(TAG,"RTSP server stopped !");
 		}
 
 		public void kill() {
@@ -358,7 +403,10 @@ public class RtspServer extends Service {
 			mInput = new BufferedReader(new InputStreamReader(client.getInputStream()));
 			mOutput = client.getOutputStream();
 			mClient = client;
-			mSession = new Session();
+			mSession = new Session(); 	
+			// 每个客户端对应一个WorkerThread Session mSession Socket mClient
+			// 在processRequest处理 DESCRIBE的时候   handleRequest 根据客户端URL重新生成
+
 		}
 
 		public void run() {
@@ -395,6 +443,20 @@ public class RtspServer extends Service {
 						Log.e(TAG,e.getMessage()!=null?e.getMessage():"An error occurred");
 						e.printStackTrace();
 						response = new Response(request);
+						/*
+						 * 	可能有如下错误 到值 客户端VLC 出现
+						 * 
+						 *  live555 error: SETUP of'video/H264' failed 500 Internal Server Error
+						 *  
+						 *  
+						 * 	D/RtspServer( 2744): a=control:trackID=1
+							E/RtspServer( 2744): SETUP 192.168.43.1:8086/trackID=1
+							E/RtspServer( 2744): An error occurred
+							D/RtspServer( 2744): RTSP/1.0 500 Internal Server Error
+							D/RtspServer( 2744): Server: MajorKernelPanic RTSP Server
+							D/RtspServer( 2744): Cseq: 4
+							D/RtspServer( 2744): Content-Length: 0
+						 * */
 					}
 				}
 
@@ -427,24 +489,38 @@ public class RtspServer extends Service {
 
 		public Response processRequest(Request request) throws IllegalStateException, IOException {
 			Response response = new Response(request);
+			
+ 
 
 			/* ********************************************************************************** */
 			/* ********************************* Method DESCRIBE ******************************** */
 			/* ********************************************************************************** */
 			if (request.method.equalsIgnoreCase("DESCRIBE")) {
-
+				/*
+				 *  C-S：DESCRIBE rtsp://192.168.1.60:8086/ RTSP/1.0
+				 
+				 	UriParser.parse 的时候 解析URL的参数
+				 	
+				 	根据 url参数 multicast h264/h263 acc/armnb camera      来 确定
+				 				组播地址   是否传输音频或视频流    视频流的摄像头 
+				 */
 				// Parse the requested URI and configure the session
 				mSession = handleRequest(request.uri, mClient);
 				mSessions.put(mSession, null);
 				mSession.syncConfigure();
 				
-				String requestContent = mSession.getSessionDescription();
+				String requestContent = mSession.getSessionDescription(); 
+				// 在handleRequest-->UrlParser.parse 创建sesson和stream 这里获得各个stream的描述
+				// mSession::mAudioStream::getSessionDescription
+				// mSession::mVideoStream::getSessionDescription
+				//
 				String requestAttributes = 
 						"Content-Base: "+mClient.getLocalAddress().getHostAddress()+":"+mClient.getLocalPort()+"/\r\n" +
 								"Content-Type: application/sdp\r\n";
 
+			 
 				response.attributes = requestAttributes;
-				response.content = requestContent;
+				response.content = requestContent; // application/sdp 协议描述媒体信息
 
 				// If no exception has been thrown, we reply with OK
 				response.status = Response.STATUS_OK;
@@ -458,6 +534,13 @@ public class RtspServer extends Service {
 				response.status = Response.STATUS_OK;
 				response.attributes = "Public: DESCRIBE,SETUP,TEARDOWN,PLAY,PAUSE\r\n";
 				response.status = Response.STATUS_OK;
+				
+				/*	OPTIONS请求时，发送可用的方法
+				 * 
+				 *  C-S：OPTIONS rtsp://192.168.1.60:8086/ RTSP/1.0		//可用选项
+				 *
+				 *	S-C: Public: DESCRIBE,SETUP,TEARDOWN,PLAY,PAUSE		//描述信息、建立连接、关闭、播放、暂停
+				 */
 			}
 
 			/* ********************************************************************************** */
@@ -468,6 +551,8 @@ public class RtspServer extends Service {
 				int p2, p1, ssrc, trackId, src[];
 				String destination;
 
+				// SETUP 192.168.1.60:8086/trackID=0 RTSP/1.0
+				
 				p = Pattern.compile("trackID=(\\w+)",Pattern.CASE_INSENSITIVE);
 				m = p.matcher(request.uri);
 
@@ -478,13 +563,23 @@ public class RtspServer extends Service {
 
 				trackId = Integer.parseInt(m.group(1));
 
-				if (!mSession.trackExists(trackId)) {
+				if (!mSession.trackExists(trackId)) { // DESCRIBE 会创建对应stream AudioStream/VideoStream
 					response.status = Response.STATUS_NOT_FOUND;
 					return response;
 				}
 
+	
 				p = Pattern.compile("client_port=(\\d+)-(\\d+)",Pattern.CASE_INSENSITIVE);
 				m = p.matcher(request.headers.get("transport"));
+				/*
+				 *  SETUP     rtsp://192.168.1.109/1.mpg/track1    RTSP/1.0    //  URL多了track1 
+				    CSeq: 3  
+				    Transport: RTP/AVP;    unicast;    client_port=1112-1113   //  URL headers
+				    User-Agent: VLC media player(LIVE555 Streaming Media v2007.02.20)  
+				
+					// client_port=5006-5007;server_port=49749-49750;
+					// 5006 作为客户端rtp的端口  5007 作为客户端rtcp的端口
+				 * */
 
 				if (!m.find()) {
 					int[] ports = mSession.getTrack(trackId).getDestinationPorts();
@@ -497,22 +592,34 @@ public class RtspServer extends Service {
 				}
 
 				ssrc = mSession.getTrack(trackId).getSSRC();
-				src = mSession.getTrack(trackId).getLocalPorts();
+				/*
+				 *	制定基于udp协议的rtp传输，目标地址，客户端端口、服务器端口，以及ssrc的数值
+				 *
+				 *	这里ssrc的数值很重要，它是同步源标识,synchronization source (SSRC) identifier
+				 *
+				 *	rtp header中包含这个 (随机生成)
+				 * */
+				src = mSession.getTrack(trackId).getLocalPorts();// 服务端给出对应这个客户端的rtp/rtcp端口
 				destination = mSession.getDestination();
 
+				// 获得对应的AudioStream 或者  VideoStream 设置其 "客户端"的 rtp端口 和  rtcp端口
 				mSession.getTrack(trackId).setDestinationPorts(p1, p2);
 				
 				boolean streaming = isStreaming();
-				mSession.syncStart(trackId);
-				if (!streaming && isStreaming()) {
-					postMessage(MESSAGE_STREAMING_STARTED);
+				mSession.syncStart(trackId); 
+				if (!streaming && isStreaming()) { 
+					postMessage(MESSAGE_STREAMING_STARTED); // 只是通知 回调 RtspServer::addCallbackListener
 				}
-
+					
+				//	Transport: RTP/AVP/UDP;unicast;destination=192.168.1.26;client_port=5006-5007;server_port=49749-49750;ssrc=431567f7;mode=play
+				// 	Session: 1185d20035702ca   
+				//	Cache-Control: no-cache
+				//	SETUP是针对某个track/stream 确定好 rtp rtcp端口号 
 				response.attributes = "Transport: RTP/AVP/UDP;"+(InetAddress.getByName(destination).isMulticastAddress()?"multicast":"unicast")+
-						";destination="+mSession.getDestination()+
-						";client_port="+p1+"-"+p2+
-						";server_port="+src[0]+"-"+src[1]+
-						";ssrc="+Integer.toHexString(ssrc)+
+						";destination="+mSession.getDestination()+ // DECRIBE时商定 rtp rtcp 的 组播地址 (UriParser.java )
+						";client_port="+p1+"-"+p2+			//  C->S 客户端的端口(rtp rtcp)  由于用MutliCast/UDP 服务端和客户端每次发送都要指定对端的ip:port
+						";server_port="+src[0]+"-"+src[1]+ 	//	S->C 服务器的端口(rtp rtcp) 
+						";ssrc="+Integer.toHexString(ssrc)+ //	S->C 该track/stream的ssrc
 						";mode=play\r\n" +
 						"Session: "+ "1185d20035702ca" + "\r\n" +
 						"Cache-Control: no-cache\r\n";
@@ -527,6 +634,12 @@ public class RtspServer extends Service {
 			/* ********************************** Method PLAY *********************************** */
 			/* ********************************************************************************** */
 			else if (request.method.equalsIgnoreCase("PLAY")) {
+				
+				/*  SETUP的时候已经启动   PLAY方法只是返回一些启动音频和视频的信息
+				 *  Session: 3  
+    				RTP-Info:  url=rtsp://192.168.1.109/1.mpg/track1; seq=9200; rtptime=214793785,
+ 								url=rtsp://192.168.1.109/1.mpg/track2;  seq=12770;  rtptime=31721  
+				 * */
 				String requestAttributes = "RTP-Info: ";
 				if (mSession.trackExists(0)) requestAttributes += "url=rtsp://"+mClient.getLocalAddress().getHostAddress()+":"+mClient.getLocalPort()+"/trackID="+0+";seq=0,";
 				if (mSession.trackExists(1)) requestAttributes += "url=rtsp://"+mClient.getLocalAddress().getHostAddress()+":"+mClient.getLocalPort()+"/trackID="+1+";seq=0,";
