@@ -65,7 +65,7 @@ public class EncoderDebugger {
 	private static final boolean DEBUG = false;
 	
 	/** Set this to true to see more logs. */
-	private static final boolean VERBOSE = false;
+	private static final boolean VERBOSE = true;
 
 	/** Will be incremented every time this test is modified. */
 	private static final int VERSION = 3;
@@ -162,26 +162,31 @@ public class EncoderDebugger {
 	private void debug() {
 		
 		// If testing the phone again is not needed, 
-		// we just restore the result from the shared preferences
+		// we just restore the result from the shared preferences'			 
+		//  libstreaming-800x480-lastSdk 代表这个分辨率已经有 保存属性  保存是系统版本号
+		//  libstreaming-800x480-lastVersion	软件版本号
+		// 
 		if (!checkTestNeeded()) {  
 			String resolution = mWidth+"x"+mHeight+"-";			
 
-			boolean success = mPreferences.getBoolean(PREF_PREFIX+resolution+"success",false);
+			boolean success = mPreferences.getBoolean(PREF_PREFIX+resolution+"success",false); // libstreaming-640x480-success
 			if (!success) {
 				throw new RuntimeException("Phone not supported with this resolution ("+mWidth+"x"+mHeight+")");
 			}
 				
-			//   保存上次对应分辨率的测试数据 
+			//    mNV21 设置 参数  后面摄像头有输入的话  可以通过mNV21来做转换 这里已经把初始化参数做好了
 			mNV21.setSize(mWidth, mHeight);
 			mNV21.setSliceHeigth(mPreferences.getInt(PREF_PREFIX+resolution+"sliceHeight", 0));
 			mNV21.setStride(mPreferences.getInt(PREF_PREFIX+resolution+"stride", 0));
 			mNV21.setYPadding(mPreferences.getInt(PREF_PREFIX+resolution+"padding", 0));
 			mNV21.setPlanar(mPreferences.getBoolean(PREF_PREFIX+resolution+"planar", false));
 			mNV21.setColorPanesReversed(mPreferences.getBoolean(PREF_PREFIX+resolution+"reversed", false));
-			mEncoderName = mPreferences.getString(PREF_PREFIX+resolution+"encoderName", "");
-			mEncoderColorFormat = mPreferences.getInt(PREF_PREFIX+resolution+"colorFormat", 0);
-			mB64PPS = mPreferences.getString(PREF_PREFIX+resolution+"pps", "");
-			mB64SPS = mPreferences.getString(PREF_PREFIX+resolution+"sps", "");
+			
+			
+			mEncoderName = mPreferences.getString(PREF_PREFIX+resolution+"encoderName", ""); 	// libstreaming-640x480-encoderName
+			mEncoderColorFormat = mPreferences.getInt(PREF_PREFIX+resolution+"colorFormat", 0); // libstreaming-640x480-colorFormat
+			mB64PPS = mPreferences.getString(PREF_PREFIX+resolution+"pps", "");					// libstreaming-640x480-pps
+			mB64SPS = mPreferences.getString(PREF_PREFIX+resolution+"sps", "");					// libstreaming-640x480-sps
 
 			return;
 		}
@@ -194,8 +199,16 @@ public class EncoderDebugger {
 		Codec[] decoders = CodecManager.findDecodersForMimeType(MIME_TYPE);
 
 		int count = 0, n = 1;
-		for (int i=0;i<encoders.length;i++) {
+		for (int i=0;i<encoders.length;i++) { 
+			// 硬件h264编码  支持的颜色空间(输入)  这里并没有考虑到  "宽 高 和 帧率  比特率"  等等
 			count += encoders[i].formats.length;
+			
+			String formats = "" ;
+			for( int j = 0 ; j < encoders[i].formats.length ; j++  ){
+				formats += encoders[i].formats[j] + " " ;
+			} 
+			 
+			Log.d(TAG, "encoder " + encoders[i].name + " support input color " + formats );
 		}
 		
 		// Tries available encoders
@@ -213,29 +226,29 @@ public class EncoderDebugger {
 				mNV21.setSliceHeigth(mHeight);
 				mNV21.setStride(mWidth);
 				mNV21.setYPadding(0);
-				mNV21.setEncoderColorFormat(mEncoderColorFormat); // 设置  NV21Convertor 是否Planar or semi-Planar
+				mNV21.setEncoderColorFormat(mEncoderColorFormat); // 设置  NV21Convertor 是否 NV12  转成 I420 
 
 				// /!\ NV21Convertor can directly modify the input
-				createTestImage(); // 创建一个图片mInitialImage  用来编码 
-				mData = mNV21.convert(mInitialImage); // NV21 转换为对应的 semi-planar
+				createTestImage(); // 创建一个图片mInitialImage  用来编码 (格式是 NV12 或者 NV21 但一定是 semi-planner )
+				mData = mNV21.convert(mInitialImage); // NV21 转换为对应的 semi-planar I420 
 
 				try {
 
 					// Starts the encoder
 					configureEncoder(); // 把编码器设置为 mEncoderColorFormat
-					searchSPSandPPS();
+					searchSPSandPPS();	// 灌YUV数据  获得 INFO_OUTPUT_FORMAT_CHANGED
 					
 					if (VERBOSE) Log.v(TAG, "SPS and PPS in b64: SPS="+mB64SPS+", PPS="+mB64PPS);
 
 					// Feeds the encoder with an image repeatidly to produce some NAL units
-					encode();
+					encode();			// 灌YUV数据 把编码后的输出H264 放到 mVideo数组
 
 					// We now try to decode the NALs with decoders available on the phone
 					boolean decoded = false;
 					for (int k=0;k<decoders.length && !decoded;k++) { // N个解码器
 						for (int l=0;l<decoders[k].formats.length && !decoded;l++) {
 							mDecoderName = decoders[k].name;
-							mDecoderColorFormat = decoders[k].formats[l];
+							mDecoderColorFormat = decoders[k].formats[l]; // 找到所有支持解码出来的颜色空间
 							try {
 								configureDecoder();
 							} catch (Exception e) {
@@ -248,7 +261,7 @@ public class EncoderDebugger {
 								if (VERBOSE) Log.d(TAG, mDecoderName+" successfully decoded the NALs (color format "+mDecoderColorFormat+")");
 								decoded = true;
 							} catch (Exception e) {
-								if (VERBOSE) Log.e(TAG, mDecoderName+" failed to decode the NALs");
+								if (VERBOSE) Log.e(TAG, mDecoderName+" failed to decode the NALs :" + e.getMessage());
 								e.printStackTrace();
 							} finally {
 								releaseDecoder();
@@ -256,6 +269,7 @@ public class EncoderDebugger {
 						}
 					}
 
+					// 如果编码出来的H264 自己都不能解码的话
 					if (!decoded) throw new RuntimeException("Failed to decode NALs from the encoder.");
 
 					// Compares the image before and after
@@ -271,7 +285,7 @@ public class EncoderDebugger {
 							if (VERBOSE) Log.d(TAG, "Some padding is needed: "+padding);
 							mNV21.setYPadding(padding);
 							createTestImage();
-							mData = mNV21.convert(mInitialImage);
+							mData = mNV21.convert(mInitialImage); 
 							encodeDecode();
 						} else {
 							// TODO: try again with a different sliceHeight
@@ -283,7 +297,7 @@ public class EncoderDebugger {
 					createTestImage();
 					if (!compareChromaPanes(false)) { // 对原始的图片 和 编解码出来的图片  U和V 不交换比较一样   ==>   编码器 对应那种格式   输入数据 不需反转UV
 						if (compareChromaPanes(true)) { //  对原始的图片 和 编解码出来的图片  U和V 不交换比较 不一样    交换比较一样 ==> 那么输入数据就要反转UV
-							mNV21.setColorPanesReversed(true); // U和V 反转了
+							mNV21.setColorPanesReversed(true); // 说明  U和V 反转了   也就是如果这时候  EncoderColorFormat  
 							if (VERBOSE) Log.d(TAG, "U and V pane are reversed");
 						} else {
 							throw new RuntimeException("Incorrect U or V pane...");
@@ -324,9 +338,7 @@ public class EncoderDebugger {
 		// If the sdk has changed on the phone, or the version of the test 
 		// it has to be run again
 		if (mPreferences.contains(PREF_PREFIX+resolution+"lastSdk")) {
-			// 
-			// xml中 libstreaming-800x480-lastSdk
-			//  代表这个分辨率已经有 保存属性
+
 			int lastSdk = mPreferences.getInt(PREF_PREFIX+resolution+"lastSdk", 0);
 			int lastVersion = mPreferences.getInt(PREF_PREFIX+resolution+"lastVersion", 0);
 			if (Build.VERSION.SDK_INT>lastSdk || VERSION>lastVersion) {
@@ -357,9 +369,9 @@ public class EncoderDebugger {
 			editor.putInt(PREF_PREFIX+resolution+"stride", mNV21.getStride());
 			editor.putInt(PREF_PREFIX+resolution+"padding", mNV21.getYPadding());
 			editor.putBoolean(PREF_PREFIX+resolution+"planar", mNV21.getPlanar());
-			editor.putBoolean(PREF_PREFIX+resolution+"reversed", mNV21.getUVPanesReversed());
+			editor.putBoolean(PREF_PREFIX+resolution+"reversed", mNV21.getUVPanesReversed()); // 这种编码格式是否需要U和V反向
 			editor.putString(PREF_PREFIX+resolution+"encoderName", mEncoderName);
-			editor.putInt(PREF_PREFIX+resolution+"colorFormat", mEncoderColorFormat);
+			editor.putInt(PREF_PREFIX+resolution+"colorFormat", mEncoderColorFormat); // 编码格式 SEMI-PLANNAR 还是 PLANNAR 
 			editor.putString(PREF_PREFIX+resolution+"encoderName", mEncoderName);
 			editor.putString(PREF_PREFIX+resolution+"pps", mB64PPS);
 			editor.putString(PREF_PREFIX+resolution+"sps", mB64SPS);
@@ -477,7 +489,7 @@ public class EncoderDebugger {
 		byte[] buffer = new byte[3*mSize/2];
 
 		int stride = mWidth, sliceHeight = mHeight;
-		int colorFormat = mDecoderColorFormat;
+		int colorFormat = mDecoderColorFormat; // 当前解码的输出颜色格式
 		boolean planar = false;
 
 		if (mDecOutputFormat != null) {
@@ -517,13 +529,13 @@ public class EncoderDebugger {
 		}
 
 		if (!planar) {
-			for (int i=0,j=0;j<mSize/4;i+=1,j+=1) {
+			for (int i=0,j=0;j<mSize/4;i+=1,j+=1) { // 如果解码输出不是 planar(I420/YV12)的话 直接原样拷贝
 				if (i%mWidth/2==0) i+=(stride-mWidth)/2;
 				buffer[mSize+2*j+1] = mDecodedVideo[k][stride*sliceHeight+2*i];
 				buffer[mSize+2*j] = mDecodedVideo[k][stride*sliceHeight+2*i+1];
 			}
 		} else {
-			for (int i=0,j=0;j<mSize/4;i+=1,j+=1) {
+			for (int i=0,j=0;j<mSize/4;i+=1,j+=1) {	// 如果是解码输出是planar(NV12 NV21) 就要转成 NV12/NV12
 				if (i%mWidth/2==0) i+=(stride-mWidth)/2;
 				buffer[mSize+2*j+1] = mDecodedVideo[k][stride*sliceHeight+i];
 				buffer[mSize+2*j] = mDecodedVideo[k][stride*sliceHeight*5/4+i];
@@ -571,7 +583,7 @@ public class EncoderDebugger {
 		csd0.put(new byte[] {0x00,0x00,0x00,0x01});
 		csd0.put(mPPS);
 
-		mDecoder = MediaCodec.createByCodecName(mDecoderName);
+		mDecoder = MediaCodec.createByCodecName(mDecoderName); // 通过解码器的名字  而不是类型 来创建 解码器 
 		MediaFormat mediaFormat = MediaFormat.createVideoFormat(MIME_TYPE, mWidth, mHeight);
 		mediaFormat.setByteBuffer("csd-0", csd0);
 		mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, mDecoderColorFormat);
@@ -583,8 +595,8 @@ public class EncoderDebugger {
 		int decInputIndex = mDecoder.dequeueInputBuffer(1000000/FRAMERATE);
 		if (decInputIndex>=0) {
 			decInputBuffers[decInputIndex].clear();
-			decInputBuffers[decInputIndex].put(prefix);
-			decInputBuffers[decInputIndex].put(mSPS);
+			decInputBuffers[decInputIndex].put(prefix); // mSPS 和  mPPS 已经去掉前引导码 这里要加上 作为NAL传入解码器
+			decInputBuffers[decInputIndex].put(mSPS); // 把sps 和  pps 提供给解码器
 			mDecoder.queueInputBuffer(decInputIndex, 0, decInputBuffers[decInputIndex].position(), timestamp(), 0);
 		} else {
 			if (VERBOSE) Log.e(TAG,"No buffer available !");
@@ -653,12 +665,14 @@ public class EncoderDebugger {
 				MediaFormat format = mEncoder.getOutputFormat();
 				ByteBuffer spsb = format.getByteBuffer("csd-0");
 				ByteBuffer ppsb = format.getByteBuffer("csd-1");
-				mSPS = new byte[spsb.capacity()-4];
+				mSPS = new byte[spsb.capacity()-4];  // 去掉头部的 00 00 00 01 四个字节
 				spsb.position(4);
 				spsb.get(mSPS,0,mSPS.length);
 				mPPS = new byte[ppsb.capacity()-4];
 				ppsb.position(4);
 				ppsb.get(mPPS,0,mPPS.length);
+				
+				Log.d(TAG, "we got sps and pps in INFO_OUTPUT_FORMAT_CHANGED");
 				break;
 
 			} else if (index == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
@@ -723,12 +737,15 @@ public class EncoderDebugger {
 			encOutputIndex = mEncoder.dequeueOutputBuffer(info, 1000000/FRAMERATE);
 			if (encOutputIndex == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
 				encOutputBuffers = mEncoder.getOutputBuffers();
-			} else if (encOutputIndex>=0) {
+			}else if( encOutputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){
+				Log.d(TAG, "encode INFO_OUTPUT_FORMAT_CHANGED" + mEncoder.getOutputFormat());
+			}else if (encOutputIndex>=0) {
 				mVideo[n] = new byte[info.size];
 				encOutputBuffers[encOutputIndex].clear();
 				encOutputBuffers[encOutputIndex].get(mVideo[n++], 0, info.size);
 				mEncoder.releaseOutputBuffer(encOutputIndex, false);
 				if (n>=NB_ENCODED) {
+					Log.d(TAG, "encode done " +  NB_ENCODED );
 					flushMediaCodec(mEncoder);
 					return elapsed;
 				}
@@ -753,10 +770,10 @@ public class EncoderDebugger {
 		ByteBuffer[] decOutputBuffers = mDecoder.getOutputBuffers();
 		BufferInfo info = new BufferInfo();
 
-		while (elapsed<3000000) {
+		while (elapsed<3000000) { // 3 sec 
 
 			// Feeds the decoder with a NAL unit
-			if (i<NB_ENCODED) {
+			if (i<NB_ENCODED) { // 编码H264 50帧  解码输出YUV 34+2帧 
 				decInputIndex = mDecoder.dequeueInputBuffer(1000000/FRAMERATE);
 				if (decInputIndex>=0) {
 					int l1 = decInputBuffers[decInputIndex].capacity();
@@ -786,30 +803,39 @@ public class EncoderDebugger {
 			decOutputIndex = mDecoder.dequeueOutputBuffer(info, 1000000/FRAMERATE);
 			if (decOutputIndex == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
 				decOutputBuffers = mDecoder.getOutputBuffers();
+				Log.d(TAG, "decode INFO_OUTPUT_BUFFERS_CHANGED");
 			} else if (decOutputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
 				mDecOutputFormat = mDecoder.getOutputFormat();
+				Log.d(TAG, "decode INFO_OUTPUT_FORMAT_CHANGED");
 			} else if (decOutputIndex>=0) {
-				if (n>2) {
+				Log.d(TAG, "decode decOutputIndex " + decOutputIndex );
+				if (n>2) { // 从第二个解码输出 才保存起来 
 					// We have successfully encoded and decoded an image !
 					int length = info.size;
-					mDecodedVideo[j] = new byte[length];
+					mDecodedVideo[j] = new byte[length]; // 存放解码输出 放到  mDecodedVideo 数组 
 					decOutputBuffers[decOutputIndex].clear();
 					decOutputBuffers[decOutputIndex].get(mDecodedVideo[j], 0, length);
 					// Converts the decoded frame to NV21
-					convertToNV21(j);
+					convertToNV21(j);	// 非常耗时间!!  解码输出  统一成 NV21 也是放到  mDecodedVideo 数组 
 					if (j>=NB_DECODED-1) {
 						flushMediaCodec(mDecoder);
 						if (VERBOSE) Log.v(TAG, "Decoding "+n+" frames took "+elapsed/1000+" ms");
 						return elapsed;
+						// 测试 保存 34个解码输出数据
 					}
-					j++;
+					j++; 
 				}
 				mDecoder.releaseOutputBuffer(decOutputIndex, false);
 				n++;
-			}	
+			}else if( decOutputIndex == MediaCodec.INFO_TRY_AGAIN_LATER ){
+				// Nothing to do 
+			}else{
+				Log.d(TAG,"decode error !");
+			}
 			elapsed = timestamp() - now;
 		}
 
+		Log.d(TAG, "decoder timeout in 3 seconds ");
 		throw new RuntimeException("The decoder did not decode anything.");
 
 	}

@@ -32,7 +32,8 @@ public class NV21Convertor {
 	private int mSliceHeight, mHeight;
 	private int mStride, mWidth;
 	private int mSize;
-	private boolean mPlanar, mPanesReversed = false;
+	private boolean mPlanar = false;		// 	semi-plannar 和  plannar 转换
+	private boolean mPanesReversed = false; //	U 和 V  反转  true的话 不用反转 
 	private int mYPadding;
 	private byte[] mBuffer; 
 	ByteBuffer mCopy;
@@ -74,7 +75,7 @@ public class NV21Convertor {
 			break;	
 		case MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar:
 		case MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420PackedPlanar:
-			setPlanar(true);
+			setPlanar(true); // 需要把图片从 semi-planar 转成  planar
 			break;
 		}
 	}
@@ -116,10 +117,10 @@ public class NV21Convertor {
 			mBuffer = new byte[3*mSliceHeight*mStride/2+mYPadding];
 		}
 		
-		if (!mPlanar) {
+		if (!mPlanar) {  
 			if (mSliceHeight==mHeight && mStride==mWidth) {
 				// Swaps U and V
-				if (!mPanesReversed) { // 交换 U 和 V
+				if (!mPanesReversed) { // 交换 U 和 V   NV21 NV12 之间转换 
 					for (int i = mSize; i < mSize+mSize/2; i += 2) {
 						mBuffer[0] = data[i+1];
 						data[i+1] = data[i];
@@ -133,10 +134,10 @@ public class NV21Convertor {
 				}
 				return data;
 			}
-		} else {
+		} else { // 需要把图片从 semi-planar 转成  planar
 			if (mSliceHeight==mHeight && mStride==mWidth) {
 				// De-interleave U and V
-				if (!mPanesReversed) {
+				if (!mPanesReversed) {// 交换 U 和 V   I420  YV12  之间转换 
 					for (int i = 0; i < mSize/4; i+=1) {
 						mBuffer[i] = data[mSize+2*i+1];
 						mBuffer[mSize/4+i] = data[mSize+2*i];
